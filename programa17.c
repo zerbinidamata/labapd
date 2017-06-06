@@ -8,17 +8,27 @@ void pins(void)
     // Inicializando pinos
     P4DIR |= BIT7;      //P4.7 SW2
     P4OUT &= ~(BIT7) ;     //P4.7 começa em 0
+
     P2DIR &= ~BIT1;     //P2.1 = entrada
     P2REN |= BIT1;   //Habilita pullup
     P2OUT |= BIT1;   //Setar BIT1 ;S1 com pullup/dw
     P1DIR &= ~BIT1;     //P2.1 = entrada
     P1REN |= BIT1;   //Habilita pullup
     P1OUT |= BIT1;   //Setar BIT1 ;S1 com pullup/dw
+
+    P5SEL |= BIT2 | BIT3 |BIT4 |BIT5;
+
+    UCSCTL1 = DCORSEL_0;
+       UCSCTL2 = FLLD_0 |194;
+       UCSCTL3 = SELREF_0| FLLREFDIV_5;
+       UCSCTL4 = SELA_1 | SELS_3 | SELM_5; //aclock, smclock, mclock
+       UCSCTL5 = DIVM_2;
+       UCSCTL6 = 0;
 }
 
 void timer(void)
 {
-    TB0CCR0 = 20971;                 // TB0 DEVE TER PERÍODO DE 1 ms
+    TB0CCR0 = 800;                 // TB0 DEVE TER PERÍODO DE 20 ms
     TB0EX0 = TAIDEX_0;
     TB0CTL = TASSEL_2|ID_0|MC_1|TACLR;
     TB0CCTL0 = CCIE;                    //Habilita
