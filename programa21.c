@@ -1,126 +1,105 @@
-#include <msp430.h> 
+#include <msp430.h>
 
-//keys
-#define SW1         BIT1
-#define SW1_IN      P2IN
-#define SW2         BIT1
-#define SW2_IN      P1IN
+#define SW1     (P2IN&BIT1)
+#define SW2     (P1IN&BIT1)
 
-//leds
-#define LED1        BIT0
-#define LED1_OUT    P1OUT
-#define LED2        BIT7
-#define LED2_OUT    P4OUT
 
-//variables
-    const int turn_red_on = 0x01;
-    const int turn_red_off = 0x0A;
-    const int turn_green_on = 0x10;
-    const int turn_green_off = 0xA0;
-
-    int state;
-
-    int state_sw1 = 0;
-    int state_sw2 = 0;
-
-//functions
 void pin_setup();
+void send(char);
 
-/*
- * main.c
- */
-int main(void) {
-    WDTCTL = WDTPW | WDTHOLD;   // Stop watchdog timer
+unsigned volatile char rcv_char;
 
-    pin_setup();
-
-            UCA0CTL1 = UCSSEL_2 |      //SMCLK
-                  UCSWRST;        //UCSI em Reset
-            UCA0CTL0 = UCSPB;           //2 Stops
-            UCA0STAT = UCLISTEN;        //Loopback <== <==
-
-        // Baudrate
-            UCA0BRW = 6;                //Divisor
-            UCA0MCTL = UCBRF_13 | UCBRS_0; //Moduladores
-
-        // Configurar portas
-            P3DIR &= ~BIT3;     //P3.3 saída
-            P3REN |= BIT3;      //Hab resistor
-            P3OUT |= BIT3;      //Pull up
-            P3SEL |= BIT3;      //Rx serial
-
-            P3DIR |= BIT4;      //P3.4 entrada
-            P3SEL |= BIT4;      //Tx serial
-
-            UCA0CTL1 &= ~UCSWRST;        //Sair do Reset
-
-            while(1)
-            {
-
-                 while ((UCA0IFG & UCTXIFG) == 0);  //Esperar TX
-                     UCA0IFG &= ~UCTXIFG;
-
-                 while ((UCA0IFG & UCRXIFG) == 0);  //Esperar Rx
-                     UCA0IFG &= ~UCRXIFG;
-
-                state =  UCA0TXBUF;
-
-                if(state == turn_red_on)
-                    LED1_OUT |= LED1;
-                if(state == turn_red_off)
-                    LED1_OUT &= ~LED1;
-                if(state == turn_green_on)
-                    LED2_OUT |= LED2;
-                if(state == turn_green_off)
-                    LED2_OUT &= ~LED2;
-            }
-}
-//interruptions
-#pragma vector = PORT1_VECTOR;
-__interrupt void port1(void)
+int main(void)
 {
-    if(state_sw1 == 0)
-    {
-      UCA0TXBUF  = turn_red_on ;
-      state_sw1 = 1;
-    }
-    if(state_sw1 == 1)
-    {
-      UCA0TXBUF  = turn_red_off ;
-      state_sw1 = 0;
-    }
+  WDTCTL = WDTPW + WDTHOLD;                 // Stop WDT
+  pin_setup();
+  __enable_interrupt();
+
+  char flag = 3; //state
+      while(1){
+          if(!SW1 && (flag&BIT0)) {
+              __delay_cycles(1000);
+              send(0x1);
+              flag &= ~BIT0;
+              while(!SW1);
+              __delay_cycles(1000);
+
+          }
+          if(!SW1 && !(flag&BIT0)){
+              __delay_cycles(1000);
+              send(0xa);
+              flag |= BIT0;
+              while(!SW1);
+              __delay_cycles(1000);
+
+
+          }
+          if(!SW2 && (flag&BIT1)){
+              __delay_cycles(1000);
+              send(0x10);
+              flag &= ~BIT1;
+              while(!SW2);
+              __delay_cycles(1000);
+          }
+          if(!(SW2) && !(flag&BIT1)){
+              __delay_cycles(1000);
+              send(0xa0);
+              flag |= BIT1;
+              while(!SW2);
+              __delay_cycles(1000);
+          }
+          switch(rcv_char){ //leds
+          case 0x1:P1OUT |= BIT0;
+          break;
+          case 0xa:P1OUT &= ~BIT0;
+          break;
+          case 0x10:P4OUT |= BIT7;
+          break;
+          case 0xa0:P4OUT &= ~BIT7;
+          break;
+          default:break;
+          }
+      }
 }
 
-#pragma vector = PORT2_VECTOR;
-__interrupt void port2(void)
-{
-    if(state_sw2 == 0)
-    {
-        UCA0TXBUF  = turn_green_on ;
-        state_sw2 = 1;
+void pin_setup(){
+    P2DIR = 0;
+    P2REN = BIT1;
+    P2OUT = BIT1;
 
-    }
-    if(state_sw2 == 1)
-    {
+    P1DIR = BIT0;
+    P1REN = BIT1;
+    P1OUT = BIT1;
 
-        UCA0TXBUF  = turn_green_off ;
-        state_sw2 = 0;
+    P4DIR = BIT7;
 
-    }
+    P3SEL = BIT3+BIT4;                        // P3.4,5 = USCI_A0 TXD/RXD
+    UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
+    UCA0CTL1 |= UCSSEL_2;                     // SMCLK
+    UCA0BR0 = 6;                              // 1MHz 9600
+    UCA0BR1 = 0;                              // 1MHz 9600
+    UCA0MCTL = UCBRS_0 + UCBRF_13 + UCOS16;   // Modln UCBRSx=0, UCBRFx=0,
+                                              // over sampling
+    UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
+    UCA0IE |= UCRXIE;                         // Enable USCI_A0 RX interrupt
 }
 
-void pin_setup()
+void send(char val){
+    while (!(UCA0IFG&UCTXIFG));             // USCI_A0 TX buffer ready?
+    UCA0TXBUF = val;
+}
+
+#pragma vector=USCI_A0_VECTOR
+__interrupt void USCI_A0_ISR(void) //interrupt USCI
 {
-        P2DIR &= ~SW1;
-        P2REN |= SW1;
-        P2OUT |= SW1;
-
-        P1DIR &= ~SW2;
-        P1REN |= SW2;
-        P1OUT |= SW2;
-
-        P1DIR |= LED1;
-        LED1_OUT &= ~LED1;
-        P4DIR |= LED2;
-        LED2_OUT &= ~LED2;
+  switch(__even_in_range(UCA0IV,4)) //The __even_in_range intrinsic provides a hint to the compiler when generating switch statements for interrupt vector routines.
+  {
+  case 0:break;                             // Vector 0 - no interrupt
+  case 2:                                   // Vector 2 - RXIFG
+    while (!(UCA0IFG&UCTXIFG));             // USCI_A0 TX buffer ready?
+    rcv_char = UCA0RXBUF;                   // TX -> RXed character
+    break;
+  case 4:break;                             // Vector 4 - TXIFG
+  default: break;
+  }
 }
